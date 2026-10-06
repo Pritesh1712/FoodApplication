@@ -57,30 +57,20 @@ public class LocalDatabaseManager {
         return instance;
     }
 
+    public void clearAllData() {
+        usersList.clear();
+        shopsList.clear();
+        foodsList.clear();
+        initDefaultOfflineData();
+    }
+
     private void initDefaultOfflineData() {
-        // Seed default Admin
+        usersList.clear();
+        shopsList.clear();
+        foodsList.clear();
+
+        // Seed ONLY pre-configured System Admin account
         usersList.add(new User("admin_1", "admin", "admin@gmail.com", "admin@123", "9999999999", Constants.ROLE_ADMIN));
-
-        // Seed default Shop 1
-        User owner1 = new User("owner_1", "Chef Marco", "marco@pizza.com", "123456", "9876543210", Constants.ROLE_RESTAURANT);
-        usersList.add(owner1);
-
-        Restaurant shop1 = new Restaurant("shop_1", "Campus Pizza Hub", "Artisanal fresh-baked pizzas & garlic bread", "Student Center, Floor 1", "9876543210", "https://images.unsplash.com/photo-1513104890138-7c749659a591?w=500", 4.8);
-        shopsList.add(shop1);
-
-        foodsList.add(new Food("f1", "Margherita Pizza", "Classic cheese and tomato pizza [Starters]", 249.00, "https://images.unsplash.com/photo-1604382354936-07c5d9983bd3?w=500", "shop_1"));
-        foodsList.add(new Food("f2", "Farmhouse Pizza", "Loaded with capsicum, onion, and cheese [Main Course]", 349.00, "https://images.unsplash.com/photo-1534308983496-4fabb1a015ee?w=500", "shop_1"));
-        foodsList.add(new Food("f3", "Cheesy Garlic Bread", "Crispy garlic bread with mozzarella [Starters]", 149.00, "https://images.unsplash.com/photo-1619895092538-128341789043?w=500", "shop_1"));
-
-        // Seed default Shop 2
-        User owner2 = new User("owner_2", "Chef Raj", "raj@spice.com", "123456", "9876543211", Constants.ROLE_RESTAURANT);
-        usersList.add(owner2);
-
-        Restaurant shop2 = new Restaurant("shop_2", "Spice Junction", "Authentic North Indian thalis & biryani", "Hostel Block C Market", "9876543211", "https://images.unsplash.com/photo-1585937421612-70a008356fbe?w=500", 4.6);
-        shopsList.add(shop2);
-
-        foodsList.add(new Food("f4", "Paneer Butter Masala", "Rich creamy paneer gravy served fresh [Main Course]", 220.00, "https://images.unsplash.com/photo-1631452180519-c014fe946bc7?w=500", "shop_2"));
-        foodsList.add(new Food("f5", "Gulab Jamun (2 pcs)", "Soft sweet gulab jamuns in syrup [Sweets & Desserts]", 80.00, "https://images.unsplash.com/photo-1551024709-8f23befc6f87?w=500", "shop_2"));
 
         saveAll();
     }
@@ -89,14 +79,30 @@ public class LocalDatabaseManager {
         if (email == null || password == null) return null;
         for (User u : usersList) {
             if (email.trim().equalsIgnoreCase(u.getEmail()) && password.equals(u.getPassword())) {
+                if (role != null && !role.equalsIgnoreCase(u.getRole())) {
+                    return null; // Role mismatch!
+                }
                 return u;
             }
         }
         if ("admin@gmail.com".equalsIgnoreCase(email.trim()) && "admin@123".equals(password)) {
+            if (role != null && !Constants.ROLE_ADMIN.equalsIgnoreCase(role)) {
+                return null; // Role mismatch!
+            }
             User admin = new User("admin_1", "admin", "admin@gmail.com", "admin@123", "9999999999", Constants.ROLE_ADMIN);
             usersList.add(admin);
             saveAll();
             return admin;
+        }
+        return null;
+    }
+
+    public User getUserByEmail(String email) {
+        if (email == null) return null;
+        for (User u : usersList) {
+            if (email.trim().equalsIgnoreCase(u.getEmail())) {
+                return u;
+            }
         }
         return null;
     }
@@ -143,21 +149,17 @@ public class LocalDatabaseManager {
                 return r;
             }
         }
-        return shopsList.get(0);
+        return !shopsList.isEmpty() ? shopsList.get(0) : null;
     }
 
     public List<Food> getFoodsForShop(String shopId) {
         List<Food> result = new ArrayList<>();
-        if (shopId == null || foodsList.isEmpty()) return foodsList;
+        if (shopId == null || foodsList.isEmpty()) return result;
 
         for (Food f : foodsList) {
             if (f.getRestaurantId() != null && f.getRestaurantId().equalsIgnoreCase(shopId)) {
                 result.add(f);
             }
-        }
-
-        if (result.isEmpty()) {
-            return foodsList;
         }
 
         return result;
@@ -198,12 +200,18 @@ public class LocalDatabaseManager {
     public void deleteUser(String userId) {
         User toRemove = null;
         for (User u : usersList) {
-            if (u.getId() != null && u.getId().equals(userId)) {
+            if (u.getId() != null && u.getId().equalsIgnoreCase(userId)) {
                 toRemove = u;
                 break;
             }
         }
         if (toRemove != null) {
+            if (Constants.ROLE_RESTAURANT.equals(toRemove.getRole())) {
+                Restaurant ownerShop = getShopByOwnerName(toRemove.getName());
+                if (ownerShop != null) {
+                    deleteShop(ownerShop.getId());
+                }
+            }
             usersList.remove(toRemove);
             saveAll();
         }
@@ -212,7 +220,7 @@ public class LocalDatabaseManager {
     public void deleteShop(String shopId) {
         Restaurant toRemoveShop = null;
         for (Restaurant r : shopsList) {
-            if (r.getId() != null && r.getId().equals(shopId)) {
+            if (r.getId() != null && r.getId().equalsIgnoreCase(shopId)) {
                 toRemoveShop = r;
                 break;
             }
@@ -222,11 +230,14 @@ public class LocalDatabaseManager {
 
             List<Food> foodsToRemove = new ArrayList<>();
             for (Food f : foodsList) {
-                if (f.getRestaurantId() != null && f.getRestaurantId().equals(shopId)) {
+                if (f.getRestaurantId() != null && f.getRestaurantId().equalsIgnoreCase(shopId)) {
                     foodsToRemove.add(f);
                 }
             }
             foodsList.removeAll(foodsToRemove);
+
+            CategoryManager.getInstance(appContext).deleteCategoriesForShop(shopId);
+
             saveAll();
         }
     }

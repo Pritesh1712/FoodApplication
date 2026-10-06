@@ -2,9 +2,17 @@ const User = require('../models/User');
 const Restaurant = require('../models/Restaurant');
 const jwt = require('jsonwebtoken');
 
+// Email & Phone Validation Regexes
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const PHONE_REGEX = /^[0-9]{10}$/;
+
 // Generate JWT Token
 const generateToken = (id) => {
-  return jwt.sign({ id }, process.env.JWT_SECRET || 'college_food_delivery_app_secret_key_2025', {
+  const secret = process.env.JWT_SECRET;
+  if (!secret) {
+    throw new Error('JWT_SECRET is missing in environment variables');
+  }
+  return jwt.sign({ id }, secret, {
     expiresIn: '30d'
   });
 };
@@ -20,20 +28,31 @@ exports.registerUser = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Admin accounts cannot be registered publicly' });
     }
 
-    if (!name || !email || !password) {
-      return res.status(400).json({ success: false, message: 'Please provide name, email, and password' });
+    if (!name || !email || !password || !phone) {
+      return res.status(400).json({ success: false, message: 'Please provide name, email, password, and phone number' });
     }
 
-    const userExists = await User.findOne({ email });
+    const cleanEmail = email.trim().toLowerCase();
+    const cleanPhone = phone.trim();
+
+    if (!EMAIL_REGEX.test(cleanEmail)) {
+      return res.status(400).json({ success: false, message: 'Invalid email address format (e.g. abc@gmail.com)' });
+    }
+
+    if (!PHONE_REGEX.test(cleanPhone)) {
+      return res.status(400).json({ success: false, message: 'Mobile number must contain exactly 10 numeric digits' });
+    }
+
+    const userExists = await User.findOne({ email: cleanEmail });
     if (userExists) {
-      return res.status(400).json({ success: false, message: 'User already exists with this email' });
+      return res.status(400).json({ success: false, message: 'User already exists with this email address' });
     }
 
     const user = await User.create({
-      name,
-      email,
+      name: name.trim(),
+      email: cleanEmail,
       password,
-      phone: phone || '',
+      phone: cleanPhone,
       role: role || 'CUSTOMER'
     });
 
@@ -44,10 +63,10 @@ exports.registerUser = async (req, res) => {
           name: shopName || (user.name + "'s Kitchen"),
           address: shopAddress || 'Campus Food Court',
           description: shopDescription || 'Quality campus food & refreshments',
-          phone: user.phone || '9876543210',
+          phone: user.phone,
           image: shopImage || 'https://images.unsplash.com/photo-1513104890138-7c749659a591?w=500',
           rating: 4.8,
-          isApproved: true,
+          isApproved: false,
           isActive: true
         });
       }
@@ -72,25 +91,33 @@ exports.registerUser = async (req, res) => {
   }
 };
 
-// @desc    Auth user & get token
+// @desc    Auth user & get token (With Role Enforcement)
 // @route   POST /api/auth/login
 // @access  Public
 exports.loginUser = async (req, res) => {
   try {
-    const { email, password } = req.body;
+    const { email, password, role } = req.body;
 
     if (!email || !password) {
       return res.status(400).json({ success: false, message: 'Please provide email and password' });
     }
 
+    const cleanEmail = email.trim().toLowerCase();
+    const adminEmail = (process.env.ADMIN_EMAIL || 'admin@gmail.com').trim().toLowerCase();
+    const adminPass = process.env.ADMIN_PASSWORD || 'admin@123';
+
     // Auto-seed and sign in pre-configured Admin account
-    if (email.trim().toLowerCase() === 'admin@gmail.com' && password === 'admin@123') {
-      let adminUser = await User.findOne({ email: 'admin@gmail.com' });
+    if (cleanEmail === adminEmail && password === adminPass) {
+      if (role && role !== 'ADMIN') {
+        return res.status(403).json({ success: false, message: 'Role mismatch! System Admin can only sign in under the ADMIN role.' });
+      }
+
+      let adminUser = await User.findOne({ email: adminEmail });
       if (!adminUser) {
         adminUser = await User.create({
           name: 'admin',
-          email: 'admin@gmail.com',
-          password: 'admin@123',
+          email: adminEmail,
+          password: adminPass,
           phone: '9999999999',
           role: 'ADMIN'
         });
@@ -109,11 +136,19 @@ exports.loginUser = async (req, res) => {
       });
     }
 
-    const user = await User.findOne({ email });
+    const user = await User.findOne({ email: cleanEmail });
 
     if (user && (await user.matchPassword(password))) {
       if (user.status === 'BLOCKED') {
         return res.status(403).json({ success: false, message: 'Your account has been blocked' });
+      }
+
+      // Enforce Role Lock: Account registered role must match requested role
+      if (role && user.role !== role) {
+        return res.status(403).json({
+          success: false,
+          message: `Role mismatch! This account is registered as a ${user.role}. Please select the ${user.role} role to sign in.`
+        });
       }
 
       const token = generateToken(user._id);

@@ -76,6 +76,20 @@ public class CategoryManager {
         return result;
     }
 
+    public void deleteCategoriesForShop(String shopId) {
+        if (shopId == null) return;
+        List<Category> toRemove = new ArrayList<>();
+        for (Category c : localCategories) {
+            if (shopId.equalsIgnoreCase(c.getRestaurantId())) {
+                toRemove.add(c);
+            }
+        }
+        if (!toRemove.isEmpty()) {
+            localCategories.removeAll(toRemove);
+            saveCategoriesToPrefs();
+        }
+    }
+
     public List<Category> getLocalCategories() {
         return localCategories;
     }

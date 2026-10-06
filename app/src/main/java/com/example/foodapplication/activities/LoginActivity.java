@@ -77,6 +77,7 @@ public class LoginActivity extends AppCompatActivity {
         Map<String, String> credentials = new HashMap<>();
         credentials.put("email", email);
         credentials.put("password", password);
+        credentials.put("role", selectedRole);
 
         btnLogin.setEnabled(false);
         Toast.makeText(this, "Signing in...", Toast.LENGTH_SHORT).show();
@@ -95,7 +96,11 @@ public class LoginActivity extends AppCompatActivity {
 
                     navigateToDashboard(user.getRole());
                 } else {
-                    performOfflineFallbackLogin(email, password, selectedRole);
+                    String errorMsg = "Invalid email or password. Please Sign Up first!";
+                    if (response.body() != null && response.body().getMessage() != null) {
+                        errorMsg = response.body().getMessage();
+                    }
+                    Toast.makeText(LoginActivity.this, errorMsg, Toast.LENGTH_LONG).show();
                 }
             }
 
@@ -108,6 +113,12 @@ public class LoginActivity extends AppCompatActivity {
     }
 
     private void performOfflineFallbackLogin(String email, String password, String selectedRole) {
+        User existingUser = LocalDatabaseManager.getInstance(this).getUserByEmail(email);
+        if (existingUser != null && !selectedRole.equalsIgnoreCase(existingUser.getRole())) {
+            Toast.makeText(this, "Role mismatch! This account is registered as a " + existingUser.getRole() + ". Please select the " + existingUser.getRole() + " role.", Toast.LENGTH_LONG).show();
+            return;
+        }
+
         User offlineUser = LocalDatabaseManager.getInstance(this).authenticateUser(email, password, selectedRole);
         if (offlineUser != null) {
             SharedPrefManager.getInstance(this).saveUser(offlineUser, "offline_token_123");

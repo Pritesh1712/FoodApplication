@@ -10,7 +10,12 @@ const protect = async (req, res, next) => {
   ) {
     try {
       token = req.headers.authorization.split(' ')[1];
-      const decoded = jwt.verify(token, process.env.JWT_SECRET || 'college_food_delivery_app_secret_key_2025');
+      const secret = process.env.JWT_SECRET;
+      if (!secret) {
+        return res.status(500).json({ success: false, message: 'Server error: JWT_SECRET is not configured' });
+      }
+
+      const decoded = jwt.verify(token, secret);
 
       req.user = await User.findById(decoded.id).select('-password');
 
@@ -24,7 +29,7 @@ const protect = async (req, res, next) => {
 
       next();
     } catch (error) {
-      console.error(error);
+      console.error('JWT Auth Error:', error.message);
       return res.status(401).json({ success: false, message: 'Not authorized, token failed' });
     }
   }

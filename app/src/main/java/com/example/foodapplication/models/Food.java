@@ -11,6 +11,7 @@ public class Food implements Serializable {
     private double price;
     private String image;
     private String categoryId;
+    private String categoryName;
     private String restaurantId;
     private boolean isAvailable;
 
@@ -23,6 +24,17 @@ public class Food implements Serializable {
         this.description = description;
         this.price = price;
         this.image = image;
+        this.restaurantId = restaurantId;
+        this.isAvailable = true;
+    }
+
+    public Food(String id, String name, String description, double price, String image, String categoryName, String restaurantId) {
+        this.id = id;
+        this.name = name;
+        this.description = description;
+        this.price = price;
+        this.image = image;
+        this.categoryName = categoryName;
         this.restaurantId = restaurantId;
         this.isAvailable = true;
     }
@@ -75,6 +87,14 @@ public class Food implements Serializable {
         this.categoryId = categoryId;
     }
 
+    public String getCategoryName() {
+        return categoryName;
+    }
+
+    public void setCategoryName(String categoryName) {
+        this.categoryName = categoryName;
+    }
+
     public String getRestaurantId() {
         return restaurantId;
     }
@@ -89,5 +109,27 @@ public class Food implements Serializable {
 
     public void setAvailable(boolean available) {
         isAvailable = available;
+    }
+
+    public boolean matchesCategory(String selectedCategory) {
+        if (selectedCategory == null || "All".equalsIgnoreCase(selectedCategory)) return true;
+        String target = normalizeCatName(selectedCategory);
+
+        String catNameNorm = categoryName != null ? normalizeCatName(categoryName) : "";
+        String descNorm = description != null ? normalizeCatName(description) : "";
+        String titleNorm = name != null ? normalizeCatName(name) : "";
+
+        return catNameNorm.contains(target) || descNorm.contains(target) || titleNorm.contains(target);
+    }
+
+    private String normalizeCatName(String cat) {
+        if (cat == null) return "";
+        String lower = cat.trim().toLowerCase();
+        if (lower.contains("starter")) return "starter";
+        if (lower.contains("main")) return "main";
+        if (lower.contains("sweet") || lower.contains("dessert")) return "dessert";
+        if (lower.contains("pizza")) return "pizza";
+        if (lower.contains("burger")) return "burger";
+        return lower;
     }
 }

@@ -33,12 +33,16 @@ import com.example.foodapplication.utils.SharedPrefManager;
 
 import java.util.HashMap;
 import java.util.Map;
+import java.util.regex.Pattern;
 
 import retrofit2.Call;
 import retrofit2.Callback;
 import retrofit2.Response;
 
 public class RegisterActivity extends AppCompatActivity {
+
+    private static final String EMAIL_REGEX = "^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,6}$";
+    private static final String PHONE_REGEX = "^[0-9]{10}$";
 
     private EditText etName, etEmail, etPhone, etPassword;
     private LinearLayout layoutShopDetails;
@@ -120,7 +124,7 @@ public class RegisterActivity extends AppCompatActivity {
 
     private void performRegister() {
         String name = etName.getText().toString().trim();
-        String email = etEmail.getText().toString().trim();
+        String email = etEmail.getText().toString().trim().toLowerCase();
         String phone = etPhone.getText().toString().trim();
         String password = etPassword.getText().toString().trim();
         String selectedRole = spinnerRole.getSelectedItem().toString();
@@ -132,6 +136,21 @@ public class RegisterActivity extends AppCompatActivity {
 
         if (email.isEmpty()) {
             etEmail.setError("Email is required");
+            return;
+        }
+
+        if (email.contains(" ") || !Pattern.matches(EMAIL_REGEX, email)) {
+            etEmail.setError("Enter a valid email address (e.g. abc@gmail.com)");
+            return;
+        }
+
+        if (phone.isEmpty()) {
+            etPhone.setError("Phone number is required");
+            return;
+        }
+
+        if (!Pattern.matches(PHONE_REGEX, phone)) {
+            etPhone.setError("Phone number must contain exactly 10 digits");
             return;
         }
 
@@ -206,7 +225,7 @@ public class RegisterActivity extends AppCompatActivity {
             Toast.makeText(this, "Account created! Welcome " + offlineUser.getName() + " (Offline Mode)", Toast.LENGTH_SHORT).show();
             navigateToDashboard(offlineUser.getRole());
         } else {
-            Toast.makeText(this, "Registration failed. User may already exist!", Toast.LENGTH_LONG).show();
+            Toast.makeText(this, "Registration failed. Email already registered!", Toast.LENGTH_LONG).show();
         }
     }
 

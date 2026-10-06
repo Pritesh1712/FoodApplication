@@ -15,8 +15,10 @@ import com.example.foodapplication.adapters.OrderAdapter;
 import com.example.foodapplication.api.ApiClient;
 import com.example.foodapplication.models.Order;
 import com.example.foodapplication.models.OrderListResponse;
+import com.example.foodapplication.models.User;
 import com.example.foodapplication.utils.InsetUtils;
 import com.example.foodapplication.utils.OrderManager;
+import com.example.foodapplication.utils.SharedPrefManager;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -67,11 +69,14 @@ public class OrderHistoryActivity extends AppCompatActivity {
     }
 
     private void loadOrdersFromBackend() {
+        User currentUser = SharedPrefManager.getInstance(this).getUser();
+        final String userId = currentUser != null ? currentUser.getId() : null;
+
         ApiClient.getApiService(this).getMyOrders().enqueue(new Callback<OrderListResponse>() {
             @Override
             public void onResponse(@NonNull Call<OrderListResponse> call, @NonNull Response<OrderListResponse> response) {
                 orderList.clear();
-                orderList.addAll(OrderManager.getInstance(OrderHistoryActivity.this).getLocalOrders());
+                orderList.addAll(OrderManager.getInstance(OrderHistoryActivity.this).getLocalOrdersForUser(userId));
                 if (response.isSuccessful() && response.body() != null && response.body().getData() != null) {
                     for (Order remoteOrder : response.body().getData()) {
                         boolean exists = false;
@@ -91,14 +96,14 @@ public class OrderHistoryActivity extends AppCompatActivity {
 
             @Override
             public void onFailure(@NonNull Call<OrderListResponse> call, @NonNull Throwable t) {
-                loadFallbackOrders();
+                loadFallbackOrders(userId);
             }
         });
     }
 
-    private void loadFallbackOrders() {
+    private void loadFallbackOrders(String userId) {
         orderList.clear();
-        orderList.addAll(OrderManager.getInstance(this).getLocalOrders());
+        orderList.addAll(OrderManager.getInstance(this).getLocalOrdersForUser(userId));
         orderAdapter.notifyDataSetChanged();
     }
 }

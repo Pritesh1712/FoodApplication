@@ -1,21 +1,32 @@
 const mongoose = require('mongoose');
 const Order = require('../models/Order');
 const Restaurant = require('../models/Restaurant');
+const Food = require('../models/Food');
 
-// @desc    Create new order
+// Valid status flow transitions map
+const VALID_TRANSITIONS = {
+  'PLACED': ['ACCEPTED', 'CANCELLED'],
+  'ACCEPTED': ['PREPARING', 'CANCELLED'],
+  'PREPARING': ['READY', 'CANCELLED'],
+  'READY': ['PICKED_UP', 'CANCELLED'],
+  'PICKED_UP': ['DELIVERED'],
+  'DELIVERED': [],
+  'CANCELLED': []
+};
+
+// @desc    Create new order (Server calculates final total from DB food prices)
 // @route   POST /api/orders
 // @access  Private (Customer)
 exports.createOrder = async (req, res) => {
   try {
-    const { restaurantId, items, totalAmount, paymentMethod, deliveryAddress } = req.body;
+    const { restaurantId, items, paymentMethod, deliveryAddress } = req.body;
 
-    if (!items || items.length === 0 || !deliveryAddress) {
-      return res.status(400).json({ success: false, message: 'Invalid order payload' });
+    if (!items || !Array.isArray(items) || items.length === 0 || !deliveryAddress) {
+      return res.status(400).json({ success: false, message: 'Invalid order payload. Items and delivery address are required.' });
     }
 
     let targetRestaurantId = restaurantId;
 
-    // Fallback if restaurantId is a string like "r1"
     if (!targetRestaurantId || !mongoose.Types.ObjectId.isValid(targetRestaurantId)) {
       const defaultRes = await Restaurant.findOne({});
       if (defaultRes) {
@@ -25,18 +36,40 @@ exports.createOrder = async (req, res) => {
       }
     }
 
-    const formattedItems = items.map(item => ({
-      food: mongoose.Types.ObjectId.isValid(item.food) ? item.food : targetRestaurantId,
-      name: item.name || 'Food Item',
-      price: item.price || 100,
-      quantity: item.quantity || 1
-    }));
+    // SERVER-SIDE PRICE CALCULATION (Do NOT trust client price/subtotal)
+    const deliveryFee = 30.0;
+    let calculatedSubtotal = 0;
+    const formattedItems = [];
+
+    for (const item of items) {
+      const foodId = item.food;
+      const quantity = Math.max(1, Number(item.quantity) || 1);
+
+      let foodDoc = null;
+      if (mongoose.Types.ObjectId.isValid(foodId)) {
+        foodDoc = await Food.findById(foodId);
+      }
+
+      const itemPrice = foodDoc ? foodDoc.price : (Number(item.price) || 100.0);
+      const itemName = foodDoc ? foodDoc.name : (item.name || 'Food Item');
+
+      calculatedSubtotal += itemPrice * quantity;
+
+      formattedItems.push({
+        food: foodDoc ? foodDoc._id : targetRestaurantId,
+        name: itemName,
+        price: itemPrice,
+        quantity: quantity
+      });
+    }
+
+    const calculatedTotal = calculatedSubtotal + deliveryFee;
 
     const order = await Order.create({
       customer: req.user._id,
       restaurant: targetRestaurantId,
       items: formattedItems,
-      totalAmount,
+      totalAmount: calculatedTotal,
       paymentMethod: paymentMethod || 'COD',
       paymentStatus: paymentMethod === 'MOCK_PAYMENT' ? 'PAID' : 'PENDING',
       orderStatus: 'PLACED',
@@ -54,7 +87,7 @@ exports.createOrder = async (req, res) => {
   }
 };
 
-// @desc    Get current user's orders
+// @desc    Get current customer's orders
 // @route   GET /api/orders/my
 // @access  Private (Customer)
 exports.getMyOrders = async (req, res) => {
@@ -69,15 +102,22 @@ exports.getMyOrders = async (req, res) => {
   }
 };
 
-// @desc    Get restaurant's incoming orders
+// @desc    Get restaurant's incoming orders (With ownership verification)
 // @route   GET /api/orders/restaurant/:restaurantId
 // @access  Private (Restaurant Owner / Admin)
 exports.getRestaurantOrders = async (req, res) => {
   try {
     let resId = req.params.restaurantId;
-    if (resId === 'my' || !mongoose.Types.ObjectId.isValid(resId)) {
-      const rest = await Restaurant.findOne({ owner: req.user._id });
-      if (rest) resId = rest._id;
+
+    if (req.user.role === 'RESTAURANT') {
+      const myRest = await Restaurant.findOne({ owner: req.user._id });
+      if (!myRest) {
+        return res.status(404).json({ success: false, message: 'No restaurant found for this owner' });
+      }
+      resId = myRest._id;
+    } else if (resId === 'my' || !mongoose.Types.ObjectId.isValid(resId)) {
+      const defaultRest = await Restaurant.findOne({});
+      if (defaultRest) resId = defaultRest._id;
     }
 
     const orders = await Order.find({ restaurant: resId })
@@ -112,13 +152,13 @@ exports.getDeliveryOrders = async (req, res) => {
   }
 };
 
-// @desc    Update order status
+// @desc    Update order status (Role-based, ownership & transition validation)
 // @route   PUT /api/orders/:id/status
 // @access  Private
 exports.updateOrderStatus = async (req, res) => {
   try {
-    const { status, deliveryPartnerId } = req.body;
-    let order;
+    const { status } = req.body;
+    let order = null;
 
     if (mongoose.Types.ObjectId.isValid(req.params.id)) {
       order = await Order.findById(req.params.id);
@@ -131,9 +171,50 @@ exports.updateOrderStatus = async (req, res) => {
     if (!order) {
       return res.status(200).json({
         success: true,
-        message: 'Order updated locally',
+        message: 'Order status updated locally',
         data: { _id: req.params.id, orderStatus: status || 'CANCELLED' }
       });
+    }
+
+    const currentStatus = order.orderStatus;
+
+    // Validate Transition Matrix
+    if (status && currentStatus !== status) {
+      const allowedNext = VALID_TRANSITIONS[currentStatus] || [];
+      if (!allowedNext.includes(status) && req.user.role !== 'ADMIN') {
+        return res.status(400).json({
+          success: false,
+          message: `Invalid order status transition from '${currentStatus}' to '${status}'`
+        });
+      }
+    }
+
+    // Role & Ownership Authorization
+    if (req.user.role === 'CUSTOMER') {
+      if (order.customer.toString() !== req.user._id.toString()) {
+        return res.status(403).json({ success: false, message: 'Not authorized to modify another customer\'s order' });
+      }
+      if (status && status !== 'CANCELLED') {
+        return res.status(403).json({ success: false, message: 'Customers can only cancel active orders' });
+      }
+    } else if (req.user.role === 'RESTAURANT') {
+      const rest = await Restaurant.findById(order.restaurant);
+      if (rest && rest.owner.toString() !== req.user._id.toString()) {
+        return res.status(403).json({ success: false, message: 'Not authorized to modify orders for another restaurant' });
+      }
+      if (status && !['ACCEPTED', 'PREPARING', 'READY', 'CANCELLED'].includes(status)) {
+        return res.status(403).json({ success: false, message: 'Invalid status for restaurant owner' });
+      }
+    } else if (req.user.role === 'DELIVERY') {
+      // Prevent multiple delivery partners from claiming the same order
+      if (order.deliveryPartner && order.deliveryPartner.toString() !== req.user._id.toString()) {
+        return res.status(400).json({ success: false, message: 'Order is already claimed by another delivery partner' });
+      }
+      order.deliveryPartner = req.user._id;
+
+      if (status && !['PICKED_UP', 'DELIVERED'].includes(status)) {
+        return res.status(403).json({ success: false, message: 'Invalid status for delivery partner' });
+      }
     }
 
     if (status) {
@@ -141,10 +222,6 @@ exports.updateOrderStatus = async (req, res) => {
       if (status === 'DELIVERED') {
         order.paymentStatus = 'PAID';
       }
-    }
-
-    if (deliveryPartnerId || req.user.role === 'DELIVERY') {
-      order.deliveryPartner = deliveryPartnerId || req.user._id;
     }
 
     const updated = await order.save();

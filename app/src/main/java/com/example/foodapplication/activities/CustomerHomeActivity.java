@@ -22,6 +22,7 @@ import com.example.foodapplication.adapters.RestaurantAdapter;
 import com.example.foodapplication.api.ApiClient;
 import com.example.foodapplication.models.Category;
 import com.example.foodapplication.models.CategoryListResponse;
+import com.example.foodapplication.models.Food;
 import com.example.foodapplication.models.Restaurant;
 import com.example.foodapplication.models.RestaurantListResponse;
 import com.example.foodapplication.models.User;
@@ -144,6 +145,7 @@ public class CustomerHomeActivity extends AppCompatActivity {
             @Override
             public void onResponse(@NonNull Call<CategoryListResponse> call, @NonNull Response<CategoryListResponse> response) {
                 categoryList.clear();
+                categoryList.add(new Category("0", "All", ""));
                 categoryList.addAll(CategoryManager.getInstance(CustomerHomeActivity.this).getLocalCategories());
                 if (response.isSuccessful() && response.body() != null && response.body().getData() != null) {
                     for (Category remote : response.body().getData()) {
@@ -163,6 +165,7 @@ public class CustomerHomeActivity extends AppCompatActivity {
             @Override
             public void onFailure(@NonNull Call<CategoryListResponse> call, @NonNull Throwable t) {
                 categoryList.clear();
+                categoryList.add(new Category("0", "All", ""));
                 categoryList.addAll(CategoryManager.getInstance(CustomerHomeActivity.this).getLocalCategories());
                 categoryAdapter.notifyDataSetChanged();
             }
@@ -195,14 +198,29 @@ public class CustomerHomeActivity extends AppCompatActivity {
         });
     }
 
-    private void filterByCategory(String categoryName) {
+    private void filterByCategory(String selectedCategory) {
+        if (selectedCategory == null || "All".equalsIgnoreCase(selectedCategory)) {
+            filteredRestaurantList.clear();
+            filteredRestaurantList.addAll(restaurantList);
+            restaurantAdapter.notifyDataSetChanged();
+            return;
+        }
+
         filteredRestaurantList.clear();
         for (Restaurant r : restaurantList) {
-            if (r.getDescription() != null && r.getDescription().toLowerCase().contains(categoryName.toLowerCase()) ||
-                    r.getName().toLowerCase().contains(categoryName.toLowerCase())) {
+            List<Food> foods = LocalDatabaseManager.getInstance(this).getFoodsForShop(r.getId());
+            boolean hasCategoryItem = false;
+            for (Food f : foods) {
+                if (f.matchesCategory(selectedCategory)) {
+                    hasCategoryItem = true;
+                    break;
+                }
+            }
+            if (hasCategoryItem) {
                 filteredRestaurantList.add(r);
             }
         }
+
         if (filteredRestaurantList.isEmpty()) {
             filteredRestaurantList.addAll(restaurantList);
         }

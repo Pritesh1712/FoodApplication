@@ -9,7 +9,8 @@ const {
 } = require('../controllers/adminController');
 const { protect, authorize } = require('../middleware/authMiddleware');
 
-router.use(protect);
+// Enforce authentication AND Admin authorization for all admin routes
+router.use(protect, authorize('ADMIN'));
 
 router.get('/users', getAllUsers);
 router.delete('/users/:id', deleteUser);

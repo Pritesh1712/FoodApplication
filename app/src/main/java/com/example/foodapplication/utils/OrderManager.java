@@ -72,6 +72,17 @@ public class OrderManager {
         }
     }
 
+    public List<Order> getLocalOrdersForUser(String userId) {
+        List<Order> userOrders = new ArrayList<>();
+        if (userId == null) return localOrders;
+        for (Order o : localOrders) {
+            if (o.getCustomerId() == null || userId.equals(o.getCustomerId())) {
+                userOrders.add(o);
+            }
+        }
+        return userOrders;
+    }
+
     public List<Order> getLocalOrders() {
         return localOrders;
     }

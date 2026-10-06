@@ -20,18 +20,28 @@ exports.addFood = async (req, res) => {
   try {
     const { restaurantId, categoryId, name, description, price, image } = req.body;
 
-    let resId = restaurantId;
-    if (!resId && req.user.role === 'RESTAURANT') {
+    let targetRestId = restaurantId;
+    if (!targetRestId && req.user.role === 'RESTAURANT') {
       const rest = await Restaurant.findOne({ owner: req.user._id });
-      if (rest) resId = rest._id;
+      if (rest) targetRestId = rest._id;
     }
 
-    if (!resId || !name || price === undefined) {
+    if (!targetRestId || !name || price === undefined) {
       return res.status(400).json({ success: false, message: 'Restaurant, name, and price are required' });
     }
 
+    const restaurant = await Restaurant.findById(targetRestId);
+    if (!restaurant) {
+      return res.status(404).json({ success: false, message: 'Restaurant not found' });
+    }
+
+    // Ownership Check: Only owner or ADMIN can add food to this restaurant
+    if (req.user.role !== 'ADMIN' && restaurant.owner.toString() !== req.user._id.toString()) {
+      return res.status(403).json({ success: false, message: 'Not authorized to add food to another restaurant' });
+    }
+
     const food = await Food.create({
-      restaurant: resId,
+      restaurant: targetRestId,
       category: categoryId || null,
       name,
       description: description || '',
@@ -50,9 +60,19 @@ exports.addFood = async (req, res) => {
 // @access  Private (Restaurant Owner / Admin)
 exports.updateFood = async (req, res) => {
   try {
-    let food = await Food.findById(req.params.id);
+    const food = await Food.findById(req.params.id);
     if (!food) {
       return res.status(404).json({ success: false, message: 'Food item not found' });
+    }
+
+    const restaurant = await Restaurant.findById(food.restaurant);
+    if (!restaurant) {
+      return res.status(404).json({ success: false, message: 'Parent restaurant not found' });
+    }
+
+    // Ownership Check: Only owner or ADMIN can update food for this restaurant
+    if (req.user.role !== 'ADMIN' && restaurant.owner.toString() !== req.user._id.toString()) {
+      return res.status(403).json({ success: false, message: 'Not authorized to update food for another restaurant' });
     }
 
     const { name, description, price, image, isAvailable } = req.body;
@@ -74,10 +94,17 @@ exports.updateFood = async (req, res) => {
 // @access  Private (Restaurant Owner / Admin)
 exports.deleteFood = async (req, res) => {
   try {
-    const food = await Food.findByIdAndDelete(req.params.id);
+    const food = await Food.findById(req.params.id);
     if (!food) {
       return res.status(404).json({ success: false, message: 'Food item not found' });
     }
+
+    const restaurant = await Restaurant.findById(food.restaurant);
+    if (restaurant && req.user.role !== 'ADMIN' && restaurant.owner.toString() !== req.user._id.toString()) {
+      return res.status(403).json({ success: false, message: 'Not authorized to delete food from another restaurant' });
+    }
+
+    await Food.findByIdAndDelete(req.params.id);
     res.json({ success: true, message: 'Food item deleted successfully' });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
